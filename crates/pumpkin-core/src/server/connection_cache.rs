@@ -14,6 +14,9 @@ use uuid::Uuid;
 
 const DEFAULT_ICON: &[u8] = include_bytes!("../../../../assets/default_icon.png");
 const MAX_SAMPLE_PLAYERS: usize = 12;
+/// Name of vanilla's `MinecraftServer.ANONYMOUS_PLAYER_PROFILE`, shown in the sample in place of
+/// players who turned off "Allow Server Listings".
+const ANONYMOUS_PLAYER_NAME: &str = "Anonymous Player";
 
 fn load_icon_from_file<P: AsRef<Path>>(path: P) -> Result<String, Box<dyn error::Error>> {
     let buf = fs::read(path)?;
@@ -37,7 +40,14 @@ fn load_icon_from_bytes(png_data: &[u8]) -> String {
 
 pub struct CachedStatus {
     pub status_response: StatusResponse,
-    player_samples: Vec<(Uuid, String)>,
+    /// Every online player, in join order.
+    online_players: Vec<OnlinePlayer>,
+}
+
+struct OnlinePlayer {
+    id: Uuid,
+    name: String,
+    allows_listing: bool,
 }
 
 pub struct CachedBranding {
@@ -87,7 +97,7 @@ impl CachedStatus {
 
         Self {
             status_response,
-            player_samples: Vec::new(),
+            online_players: Vec::new(),
         }
     }
 
@@ -114,22 +124,37 @@ impl CachedStatus {
     }
 
     fn build_sample_list(&self) -> Vec<Sample> {
-        self.player_samples
+        self.online_players
             .iter()
             .take(MAX_SAMPLE_PLAYERS)
-            .map(|(id, name)| Sample {
-                name: name.clone(),
-                id: id.to_string(),
+            .map(|player| {
+                if player.allows_listing {
+                    Sample {
+                        name: player.name.clone(),
+                        id: player.id.to_string(),
+                    }
+                } else {
+                    Sample {
+                        name: ANONYMOUS_PLAYER_NAME.to_string(),
+                        id: Uuid::nil().to_string(),
+                    }
+                }
             })
             .collect()
     }
 
-    pub fn add_player(&mut self, player: &Player) {
+    /// Counts the player as online. Like vanilla, a player who doesn't allow server listings still counts,
+    /// but shows up in the sample as an anonymous player.
+    pub fn add_player(&mut self, player: &Player, allows_listing: bool) {
         let player_id = player.gameprofile.id;
         let player_name = player.gameprofile.name.clone();
 
-        if !self.player_samples.iter().any(|(id, _)| *id == player_id) {
-            self.player_samples.push((player_id, player_name));
+        if !self.online_players.iter().any(|p| p.id == player_id) {
+            self.online_players.push(OnlinePlayer {
+                id: player_id,
+                name: player_name,
+                allows_listing,
+            });
             let sample = self.build_sample_list();
 
             if let Some(players) = &mut self.status_response.players {
@@ -142,8 +167,8 @@ impl CachedStatus {
     pub fn remove_player(&mut self, player: &Player) {
         let player_id = player.gameprofile.id;
 
-        if self.player_samples.iter().any(|(id, _)| *id == player_id) {
-            self.player_samples.retain(|(id, _)| *id != player_id);
+        if self.online_players.iter().any(|p| p.id == player_id) {
+            self.online_players.retain(|p| p.id != player_id);
             let sample = self.build_sample_list();
 
             if let Some(players) = &mut self.status_response.players {

@@ -673,7 +673,7 @@ impl Server {
     /// 3. **(TODO: Select default from config)** Selects the world for the player (currently uses the first world).
     /// 4. Creates a new `Player` instance using the provided information.
     /// 5. Adds the player to the chosen world.
-    /// 6. **(TODO: Config if we want increase online)** Optionally updates server listing information based on the player's configuration.
+    /// 6. Counts the player in the server list status (the name is only shown if the player allows server listings).
     ///
     /// # Arguments
     ///
@@ -780,16 +780,13 @@ impl Server {
                         user_cache.upsert(player.gameprofile.id, player.gameprofile.name.clone());
                     };
 
-                    // TODO: Config if we want increase online
-                    if let Some(config) = config {
-                        // TODO: Config so we can also just ignore this hehe
-                        if config.server_listing {
-                            self.listing
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .add_player(&player);
-                        }
-                    }
+                    // Like vanilla, every player counts as online. "Allow Server Listings" only decides
+                    // whether the name is shown in the sample.
+                    let allows_listing = config.is_some_and(|config| config.server_listing);
+                    self.listing
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .add_player(&player, allows_listing);
 
                     let player_dto = crate::net::management::dto::PlayerDto::new(
                         Some(player.gameprofile.id),
@@ -820,7 +817,6 @@ impl Server {
             pumpkin_data::statistic::CustomStatistic::LeaveGame as i32,
             1,
         );
-        // TODO: Config if we want decrease online
         self.listing
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
