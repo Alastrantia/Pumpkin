@@ -4462,6 +4462,14 @@ impl World {
                 .await;
         }
 
+        // Vanilla replaces the `ServerPlayer` on every respawn, so `ChunkMap` drops the whole chunk view and
+        // sends it again even when the player stays in the same world. Do the same here: otherwise only the
+        // centre chunk is re-sent, and a client that cleared its world on respawn sees almost nothing.
+        // Cross-dimension respawns already unloaded the old world's chunks above.
+        if target_world.uuid == self.uuid {
+            player.unload_watched_chunks(self).await;
+        }
+
         // Send respawn packet with target dimension (using send_packet_now to ensure proper order)
         player
             .send_client_packet(&CRespawn::new(
